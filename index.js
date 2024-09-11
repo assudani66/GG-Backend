@@ -1,25 +1,30 @@
 import express from 'express';
-import { createServer } from 'node:http';
+import cors from 'cors';
+import { createServer } from 'http';
 import { Server } from 'socket.io';
 
 const app = express();
-const server = createServer(app);
-const io = new Server(server, {
-    cors: {
-      origin: "*", // Replace with your React app's origin
-      methods: ["GET", "POST"],
-      credentials: true,
-    },
-  });
+const PORT = 3000;
+const httpServer = createServer(app);
+const socketIO = new Server(httpServer, {
+  cors: {
+    origin: '*', 
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
+
+app.use(cors());
 
 const MAX_USERS_PER_ROOM = 2; // Restrict to 2 users per room
+let users = [];
 
-io.on('connection', (socket) => {
-  console.log('User connected', socket.id);
+socketIO.on('connection', (socket) => {
+  console.log(`⚡: ${socket.id} user just connected!`);
 
   // Handle joining a room
   socket.on('joinRoom', (room) => {
-    const roomSize = io.sockets.adapter.rooms.get(room)?.size || 0;
+    const roomSize = socketIO.sockets.adapter.rooms.get(room)?.size || 0;
 
     if (roomSize < MAX_USERS_PER_ROOM) {
       socket.join(room);
@@ -34,15 +39,35 @@ io.on('connection', (socket) => {
   // Handle chat messages
   socket.on('chatMessage', (msg, room) => {
     console.log(`Message from ${socket.id} in room ${room}: ${msg}`);
-    io.to(room).emit('chatMessage', { user: socket.id, msg });
+    socketIO.emit('messageRecieved', { user: socket.id, msg,room: room });
+  });
+
+  // Handle typing notification
+  socket.on('typing', (data) => {
+    socket.broadcast.emit('typingResponse', data);
+  });
+
+  // Handle new users
+  socket.on('newUser', (data) => {
+    users.push(data);
+    socketIO.emit('newUserResponse', users);
   });
 
   // Handle disconnect
   socket.on('disconnect', () => {
-    console.log('User disconnected', socket.id);
+    console.log('🔥: A user disconnected');
+    users = users.filter((user) => user.socketID !== socket.id);
+    socketIO.emit('newUserResponse', users);
+    socket.disconnect();
   });
 });
 
-server.listen(3000, () => {
-  console.log('Server listening on http://localhost:3000');
+// Simple API endpoint
+app.get('/api', (req, res) => {
+  res.json({ message: 'Hello' });
+});
+
+// Start server
+httpServer.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
 });
